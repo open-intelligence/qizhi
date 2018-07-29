@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "taskRoles": {
+    "LRSMaster": {
+      "taskNumber": 2,
+      "taskService": {
+        "version": 1,
+        "entryPoint": "ExampleFramework/ExampleFramework.sh",
+        "sourceLocations": [
+          "/ExampleFramework"
+        ],
+        "resource": {
+          "cpuNumber": 1,
+          "memoryMB": 1,
+          "useTheSamePorts": false,
+          "portDefinitions": {
+            "httpPort": {
+              "start": 0,
+              "count": 2
+            }
+          }
+        }
+      }
+    }
+  }
+}

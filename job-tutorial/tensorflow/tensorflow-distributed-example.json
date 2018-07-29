@@ -1,0 +1,33 @@
+{
+  "jobName": "tensorflow-distributed-jobguid",
+  "image": "qizhi.run.tensorflow",
+
+  // download cifar10 dataset from http://www.cs.toronto.edu/~kriz/cifar.html and upload to hdfs
+  "dataDir": "$QIZHI_DEFAULT_FS_URI/path/tensorflow-distributed-jobguid/data",
+  // make a new dir for output on hdfs
+  "outputDir": "$QIZHI_DEFAULT_FS_URI/path/tensorflow-distributed-jobguid/output",
+  // download code from tensorflow benchmark https://git.io/vF4wT and upload to hdfs
+  "codeDir": "$QIZHI_DEFAULT_FS_URI/path/tensorflow-distributed-jobguid/code",
+  "virtualCluster": "default",
+
+  "taskRoles": [
+    {
+      "name": "ps_server",
+      "taskNumber": 2,
+      "cpuNumber": 2,
+      "memoryMB": 8192,
+      "gpuNumber": 0,
+      "command": "pip --quiet install scipy && python code/tf_cnn_benchmarks.py --local_parameter_device=cpu --batch_size=32 --model=resnet20 --variable_update=parameter_server --data_dir=$QIZHI_DATA_DIR --data_name=cifar10 --train_dir=$QIZHI_OUTPUT_DIR --ps_hosts=$QIZHI_TASK_ROLE_ps_server_HOST_LIST --worker_hosts=$QIZHI_TASK_ROLE_worker_HOST_LIST --job_name=ps --task_index=$QIZHI_CURRENT_TASK_ROLE_CURRENT_TASK_INDEX"
+    },
+    {
+      "name": "worker",
+      "taskNumber": 2,
+      "cpuNumber": 2,
+      "memoryMB": 16384,
+      "gpuNumber": 4,
+      "command": "pip --quiet install scipy && python code/tf_cnn_benchmarks.py --local_parameter_device=cpu --batch_size=32 --model=resnet20 --variable_update=parameter_server --data_dir=$QIZHI_DATA_DIR --data_name=cifar10 --train_dir=$QIZHI_OUTPUT_DIR --ps_hosts=$QIZHI_TASK_ROLE_ps_server_HOST_LIST --worker_hosts=$QIZHI_TASK_ROLE_worker_HOST_LIST --job_name=worker --task_index=$QIZHI_CURRENT_TASK_ROLE_CURRENT_TASK_INDEX"
+    }
+  ],
+  "killAllOnCompletedTaskNumber": 2,
+  "retryCount": 0
+}

@@ -1,0 +1,252 @@
+#!/bin/bash
+
+# Copyright (c) Microsoft Corporation
+# All rights reserved.
+#
+# MIT License
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+# documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
+# to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+# BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+# 
+# Copyright (c) Peking University 2018
+# 
+# The software is released under the Open-Intelligence Open Source License V1.0.
+# The copyright owner promises to follow "Open-Intelligence Open Source Platform
+# Management Regulation V1.0", which is provided by The New Generation of 
+# Artificial Intelligence Technology Innovation Strategic Alliance (the AITISA).
+
+
+# Bootstrap script for docker container.
+
+exec 17>/tmp/qizhi_dockercontainer_$QIZHI_CONTAINER_ID.log
+BASH_XTRACEFD=17
+
+function exit_handler()
+{
+  printf "%s %s\n" \
+    "[DEBUG]" "EXIT signal received in docker container, exiting ..."
+  set +x
+  exec 17>&-
+  hdfs dfs -put /tmp/qizhi_dockercontainer_$QIZHI_CONTAINER_ID.log \
+    {{{ hdfsUri }}}/Container/{{{ jobData.userName }}}/{{{ jobData.jobName }}}/log/
+  kill 0
+}
+
+set -x
+trap exit_handler EXIT
+
+
+touch "/alive/docker_$QIZHI_CONTAINER_ID"
+while /bin/true; do
+  [ $(( $(date +%s) - $(stat -c %Y /alive/yarn_$QIZHI_CONTAINER_ID) )) -gt 60 ] \
+    && pkill -9 --ns 1
+  sleep 20
+done &
+
+
+printf "%s %s\n%s\n\n" "[INFO]" "HADOOP CLASSPATH" "$(hadoop classpath --glob)"
+
+export QIZHI_WORK_DIR="$(pwd)"
+export QIZHI_DEFAULT_FS_URI={{{ hdfsUri }}}
+HDFS_LAUNCHER_PREFIX=$QIZHI_DEFAULT_FS_URI/Container
+export CLASSPATH="$(hadoop classpath --glob)"
+
+export QIZHI_JOB_NAME={{{ jobData.jobName }}}
+export QIZHI_USER_NAME={{{ jobData.userName }}}
+export QIZHI_DATA_DIR={{{ jobData.dataDir }}}
+export QIZHI_OUTPUT_DIR={{{ jobData.outputDir }}}
+export QIZHI_CODE_DIR={{{ jobData.codeDir }}}
+export QIZHI_CURRENT_TASK_ROLE_NAME={{{ taskData.name }}}
+export QIZHI_CURRENT_TASK_ROLE_TASK_COUNT={{{ taskData.taskNumber }}}
+export QIZHI_CURRENT_TASK_ROLE_CPU_COUNT={{{ taskData.cpuNumber }}}
+export QIZHI_CURRENT_TASK_ROLE_MEM_MB={{{ taskData.memoryMB }}}
+export QIZHI_CURRENT_TASK_ROLE_GPU_COUNT={{{ taskData.gpuNumber }}}
+export QIZHI_JOB_TASK_COUNT={{{ tasksNumber }}}
+export QIZHI_JOB_TASK_ROLE_COUNT={{{ taskRolesNumber }}}
+export QIZHI_JOB_TASK_ROLE_LIST={{{ taskRoleList }}}
+export QIZHI_KILL_ALL_ON_COMPLETED_TASK_NUM={{{ jobData.killAllOnCompletedTaskNumber }}}
+
+port_list=(${QIZHI_CONTAINER_HOST_PORT_LIST//;/ })
+for ports in "${port_list[@]}"; do
+  port_label="$(cut -f 1 -d":" <<< $ports)"
+  export QIZHI_CONTAINER_HOST_${port_label}_PORT_LIST="$(cut -f 2 -d":" <<< $ports)"
+done
+
+export QIZHI_CONTAINER_HOST_PORT="$(cut -f 1 -d"," <<< $QIZHI_CONTAINER_HOST_http_PORT_LIST)"
+export QIZHI_CONTAINER_SSH_PORT="$(cut -f 1 -d"," <<< $QIZHI_CONTAINER_HOST_ssh_PORT_LIST)"
+
+task_role_no={{{ idx }}}
+# Touch a container id file in "APP_ID-TASK_ROLE_NO-TASK_INDEX-CONTAINER_HOST_IP-CONTAINER_HOST_PORT" format on hdfs
+# To communicate with other containers, add APP_ID as prefix to differentiate attempts with same job name
+hdfs dfs -touchz $HDFS_LAUNCHER_PREFIX/$QIZHI_USER_NAME/$QIZHI_JOB_NAME/tmp/$APP_ID-$task_role_no-$QIZHI_TASK_INDEX-$QIZHI_CONTAINER_HOST_IP-$QIZHI_CONTAINER_HOST_PORT || exit 1
+while [ `hdfs dfs -ls $HDFS_LAUNCHER_PREFIX/$QIZHI_USER_NAME/$QIZHI_JOB_NAME/tmp/ | grep "/$QIZHI_JOB_NAME/tmp/$APP_ID-" | wc -l` -lt  $QIZHI_JOB_TASK_COUNT ]; do
+  printf "%s %s\n" "[INFO]" "Waiting for other containers ..."
+  sleep 10
+done
+hdfs dfs -ls $HDFS_LAUNCHER_PREFIX/$QIZHI_USER_NAME/$QIZHI_JOB_NAME/tmp/ \
+  | grep "/$QIZHI_JOB_NAME/tmp/$APP_ID-" \
+  | grep -oE "[^/]+$" \
+  | sed -e "s/^$APP_ID-//g" \
+  | sort -n -k 2 -t"-" \
+  > ContainerList
+if [ "$(cat ContainerList | wc -l)" -ne $QIZHI_JOB_TASK_COUNT ]; then
+  printf "%s %s\n%s\n%s\n\n" \
+    "[ERROR]" "ContainerList" \
+    "$(cat ContainerList)" \
+    "$(cat ContainerList | wc -l) containers are available, not equal to $QIZHI_JOB_TASK_COUNT, exit ..."
+  exit 2
+fi
+
+export QIZHI_CURRENT_TASK_ROLE_CURRENT_TASK_INDEX=$((`cat ContainerList | grep "^$task_role_no-" | grep -n "$task_role_no-$QIZHI_TASK_INDEX-$QIZHI_CONTAINER_HOST_IP-$QIZHI_CONTAINER_HOST_PORT" | cut -d ":" -f 1`-1))
+task_role_list=(${QIZHI_JOB_TASK_ROLE_LIST//,/ })
+for i in `seq 0 $((QIZHI_JOB_TASK_ROLE_COUNT-1))`; do
+  host_list=`cat ContainerList | grep "^$i-" | cut -d "-" -f 3-4 | tr "-" ":" | sed -e :E -e "N;s/\n/,/;tE"`
+  export QIZHI_TASK_ROLE_${i}_HOST_LIST=$host_list
+  export QIZHI_TASK_ROLE_${task_role_list[$i]}_HOST_LIST=$host_list
+done
+rm ContainerList
+
+printf "%s %s\n%s\n\n" "[INFO]" "ENV" "$(printenv | sort)"
+
+if [[ -n $QIZHI_CODE_DIR ]]; then
+  hdfs dfs -get $QIZHI_CODE_DIR || exit 1
+fi
+
+# Backward compatibility
+export QIZHI_USERNAME=$QIZHI_USER_NAME
+export QIZHI_TASK_ROLE_NAME=$QIZHI_CURRENT_TASK_ROLE_NAME
+export QIZHI_TASK_ROLE_NUM=$QIZHI_CURRENT_TASK_ROLE_TASK_COUNT
+export QIZHI_TASK_CPU_NUM=$QIZHI_CURRENT_TASK_ROLE_CPU_COUNT
+export QIZHI_TASK_MEM_MB=$QIZHI_CURRENT_TASK_ROLE_MEM_MB
+export QIZHI_TASK_GPU_NUM=$QIZHI_CURRENT_TASK_ROLE_GPU_COUNT
+export QIZHI_TASK_ROLE_INDEX=$QIZHI_CURRENT_TASK_ROLE_CURRENT_TASK_INDEX
+export QIZHI_TASKS_NUM=$QIZHI_JOB_TASK_COUNT
+export QIZHI_TASK_ROLES_NUM=$QIZHI_JOB_TASK_ROLE_COUNT
+export QIZHI_TASK_ROLE_LIST=$QIZHI_JOB_TASK_ROLE_LIST
+export QIZHI_CURRENT_CONTAINER_IP=$QIZHI_CONTAINER_HOST_IP
+export QIZHI_CURRENT_CONTAINER_PORT=$QIZHI_CONTAINER_HOST_PORT
+
+function prepare_ssh()
+{
+  mkdir /root/.ssh
+  sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+  sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd
+}
+
+function start_ssh_service()
+{
+  printf "%s %s\n" \
+    "[INFO]" "start ssh service"
+  cat /root/.ssh/$APP_ID.pub >> /root/.ssh/authorized_keys
+  sed -i 's/Port.*/Port '$QIZHI_CONTAINER_SSH_PORT'/' /etc/ssh/sshd_config
+  echo "sshd:ALL" >> /etc/hosts.allow
+  service ssh restart
+}
+
+function hdfs_upload_atomically()
+{
+  printf "%s %s\n%s %s\n%s %s\n" \
+    "[INFO]" "upload ssh key to hdfs" \
+    "[INFO]" "destination path is ${2}" \
+    "[INFO]" "source path is ${1}"
+  tempFolder=${2}"_temp"
+  if hdfs dfs -test -d $tempFolder ; then
+    printf "%s %s\n" \
+      "[WARNING]" "$tempFolder already exists, overwriting..."
+    hdfs dfs -rm -r $tempFolder || exit 1
+  fi
+  hdfs dfs -put ${1} $tempFolder || exit 1
+  hdfs dfs -mv $tempFolder ${2} || exit 1
+}
+
+# Start sshd in docker container
+prepare_ssh
+hdfs_ssh_folder=${HDFS_LAUNCHER_PREFIX}/${QIZHI_USER_NAME}/${QIZHI_JOB_NAME}/ssh/${APP_ID}
+printf "%s %s\n%s %s\n%s %s\n" \
+  "[INFO]" "hdfs_ssh_folder is ${hdfs_ssh_folder}" \
+  "[INFO]" "task_role_no is ${task_role_no}" \
+  "[INFO]" "QIZHI_TASK_INDEX is ${QIZHI_TASK_INDEX}"
+# Let taskRoleNumber=0 and taskindex=0 execute upload ssh files
+if [ ${task_role_no} -eq 0 ] && [ ${QIZHI_TASK_INDEX} -eq 0 ]; then
+  printf "%s %s %s\n%s\n" \
+    "[INFO]" "task_role_no:${task_role_no}" "QIZHI_TASK_INDEX:${QIZHI_TASK_INDEX}" \
+    "Execute upload key pair ..."
+  ssh-keygen -N '' -t rsa -f ~/.ssh/$APP_ID
+  hdfs dfs -mkdir -p "${hdfs_ssh_folder}" || exit 1
+  hdfs_upload_atomically "/root/.ssh/" "${hdfs_ssh_folder}/.ssh"
+else
+  # Waiting for ssh key-pair ready
+  while ! hdfs dfs -test -d ${hdfs_ssh_folder}/.ssh ; do
+    echo "[INFO] waitting for ssh key ready"
+    sleep 10
+  done
+  printf "%s %s\n%s %s\n" \
+    "[INFO]" "ssh key pair ready ..." \
+    "[INFO]" "begin to download ssh key pair from hdfs ..."
+  hdfs dfs -get "${hdfs_ssh_folder}/.ssh/" "/root/" || exit 1
+fi
+chmod 400 ~/.ssh/$APP_ID
+# Generate ssh connect info file in "QIZHI_CONTAINER_ID-QIZHI_CURRENT_CONTAINER_IP-QIZHI_CONTAINER_SSH_PORT" format on hdfs
+hdfs dfs -touchz ${hdfs_ssh_folder}/$QIZHI_CONTAINER_ID-$QIZHI_CONTAINER_HOST_IP-$QIZHI_CONTAINER_SSH_PORT || exit 1
+
+# Generate ssh config
+ssh_config_path=${HDFS_LAUNCHER_PREFIX}/${QIZHI_USER_NAME}/${QIZHI_JOB_NAME}/ssh/config
+hdfs dfs -mkdir -p ${ssh_config_path} || exit 1
+hdfs dfs -touchz ${ssh_config_path}/$APP_ID+$QIZHI_CURRENT_TASK_ROLE_NAME+$QIZHI_CURRENT_TASK_ROLE_CURRENT_TASK_INDEX+$QIZHI_CONTAINER_HOST_IP+$QIZHI_CONTAINER_SSH_PORT || exit 1
+while [ `hdfs dfs -ls $ssh_config_path | grep "/$QIZHI_JOB_NAME/ssh/config/$APP_ID+" | wc -l` -lt  $QIZHI_JOB_TASK_COUNT ]; do
+  printf "%s %s\n" "[INFO]" "Waiting for ssh service in other containers ..."
+  sleep 10
+done
+NodeList=($(hdfs dfs -ls ${ssh_config_path} \
+  | grep "/$QIZHI_JOB_NAME/ssh/config/$APP_ID+" \
+  | grep -oE "[^/]+$" \
+  | sed -e "s/^$APP_ID+//g" \
+  | sort -n))
+if [ "${#NodeList[@]}" -ne $QIZHI_JOB_TASK_COUNT ]; then
+  printf "%s %s\n%s\n%s\n\n" \
+    "[ERROR]" "NodeList" \
+    "${NodeList[@]}" \
+    "ssh services in ${#NodeList[@]} containers are available, not equal to $QIZHI_JOB_TASK_COUNT, exit ..."
+  exit 2
+fi
+for line in "${NodeList[@]}"; do
+  node=(${line//+/ });
+  printf "%s\n  %s\n  %s\n  %s\n  %s\n  %s\n  %s\n" \
+    "Host ${node[0]}-${node[1]}" \
+    "HostName ${node[2]}" \
+    "Port ${node[3]}" \
+    "User root" \
+    "StrictHostKeyChecking no" \
+    "UserKnownHostsFile /dev/null" \
+    "IdentityFile /root/.ssh/$APP_ID" >> /root/.ssh/config
+done
+
+# Start ssh service
+start_ssh_service
+
+# Write env to system-wide environment
+env | grep -E "^QIZHI|PATH|PREFIX|JAVA|HADOOP|NVIDIA|CUDA" > /etc/environment
+
+sleep 10
+printf "%s %s\n\n" "[INFO]" "USER COMMAND START"
+{{{ taskData.command }}} || exit $?
+printf "\n%s %s\n\n" "[INFO]" "USER COMMAND END"
+
+{{# jobData.killAllOnCompletedTaskNumber }}
+hdfs dfs -touchz $HDFS_LAUNCHER_PREFIX/$QIZHI_USER_NAME/$QIZHI_JOB_NAME/finished/$APP_ID-$QIZHI_TASK_INDEX || exit 1
+while [ `hdfs dfs -ls $HDFS_LAUNCHER_PREFIX/$QIZHI_USER_NAME/$QIZHI_JOB_NAME/finished/ | grep "/$QIZHI_JOB_NAME/finished/$APP_ID-" | wc -l` -lt  $QIZHI_KILL_ALL_ON_COMPLETED_TASK_NUM ]; do
+  sleep 10
+done
+{{/ jobData.killAllOnCompletedTaskNumber }}
+
+exit 0

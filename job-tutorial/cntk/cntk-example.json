@@ -1,0 +1,23 @@
+{
+  "jobName": "cntk-jobguid",
+  "image": "qizhi.run.cntk",
+
+  // prepare cmudict corpus in CNTK format https://git.io/vbT5A and upload to hdfs
+  "dataDir": "$QIZHI_DEFAULT_FS_URI/path/cntk-jobguid/data",
+  // make a new dir for output on hdfs
+  "outputDir": "$QIZHI_DEFAULT_FS_URI/path/cntk-jobguid/output",
+  // prepare g2p training script cntk-example.sh and upload to hdfs
+  "codeDir": "$QIZHI_DEFAULT_FS_URI/path/cntk-jobguid/code",
+  "virtualCluster": "default",
+
+  "taskRoles": [
+    {
+      "name": "g2p-train",
+      "taskNumber": 1,
+      "cpuNumber": 8,
+      "memoryMB": 16384,
+      "gpuNumber": 1,
+      "command": "cd code && /bin/bash cntk-example.sh"
+    }
+  ]
+}
