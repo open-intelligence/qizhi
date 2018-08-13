@@ -51,9 +51,9 @@ Note: Don't change the file name!!!!!!!!!!!!
 
 #### solution 1
 
-Because cloud providers such as azure always have the load balance service. So when deploy pai to the cloud platform, you could chose the load-balance service to implement the high-availability.
+Because cloud providers such as azure always have the load balance service. So when deploy pai to the cloud platform, you could choose the load-balance service to implement the high-availability.
 
-Before bootstrap your kubernetes cluster, you should configure your load-balance. please set the backend with your master. And set the following property with the ip of the load-balance in the [kubernetes-configuration.yaml](https://github.com/open-intelligence/qizhi/blob/master/cluster-configuration/kubernetes-configuration.yaml).
+Before bootstrap your kubernetes cluster, you should configure your load-balance. please set the backend with your master. And set the following property with the ip of the load-balance in the [kubernetes-configuration.yaml](../cluster-configuration/kubernetes-configuration.yaml).
 
 ```yaml
 
@@ -102,7 +102,7 @@ You should configuration you node role as following. (None-ha proxy)
 ```
 
 
-Set the following property with the ip of the load-balance in the [kubernetes-configuration.yaml](https://github.com/open-intelligence/qizhi/blob/master/cluster-configuration/kubernetes-configuration.yaml).
+Set the following property with the ip of the load-balance in the [kubernetes-configuration.yaml](../cluster-configuration/kubernetes-configuration.yaml).
 
 ```yaml
 
@@ -137,7 +137,7 @@ For example.
 
 ```
 
-Set the following property with the ip of the load-balance in the [kubernetes-configuration.yaml](https://github.com/open-intelligence/qizhi/blob/master/cluster-configuration/kubernetes-configuration.yaml).
+Set the following property with the ip of the load-balance in the [kubernetes-configuration.yaml](../cluster-configuration/kubernetes-configuration.yaml).
 
 ```yaml
 
@@ -146,9 +146,7 @@ load-balance-ip: master ip
 ```
 
 
-## Cluster maintenance
 
-Please refer to this [wiki](https://github.com/open-intelligence/qizhi/wiki/Cluster-Maintenance)
 
 ## Prepare your dev-box environment
 
