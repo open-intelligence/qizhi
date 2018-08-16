@@ -143,7 +143,7 @@ def train(train_loader, model, criterion, optimizer, epoch, writer,w_cen_end=Non
             print('Epoch: [{0}][{1}/{2}]\t, batch_time: {3}'.format(epoch, i, len(train_loader), batch_time.avg))
 
 # Weight centers
-with open('res18_cen16.json', 'r') as f:
+with open('compress_resnet18/res18_cen16.json', 'r') as f:
     modelinit = json.load(f)
 nllloss = nn.CrossEntropyLoss().cuda()
 class_wl = Model_WeightLoss(model.module, modelinit, loss_weight =0.1)
@@ -156,10 +156,10 @@ writer = SummaryWriter()
 up_hist = []
 for i in range(in_epoch):
     train(train_loader, model, criterion, optimizer, i, writer, modelinit)
-    torch.save(model.state_dict(), './res18_model_cen16/'+str(i)+'.torch')
+    torch.save(model.state_dict(), './compress_resnet18/'+str(i)+'.torch')
     if i%interval_epoch == (interval_epoch-1):
         class_wl.phase_shrink()
         up_hist.append(criterion[1].update_phase())
 class_wl.counter = 0
 class_wl.Traverse_layer(model.children(), cen_dict = class_wl.cen_dict_list, in_func=class_wl.last_prune)
-torch.save(model.state_dict(), './res18_model_cen16/compressed.torch')
+torch.save(model.state_dict(), './compress_resnet18/compressed.torch')
