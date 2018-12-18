@@ -1,0 +1,14 @@
+{
+  "jobName": "user-{{ username }}-{{ count }}",
+  "image": "localhost:5000/user-base-image",
+  "taskRoles": [
+    {
+      "name": "main",
+      "taskNumber": "1",
+      "cpuNumber": "4",
+      "memoryMB": "16384",
+      "gpuNumber": "0",
+      "command": "/bin/bash"
+    }
+  ]
+}

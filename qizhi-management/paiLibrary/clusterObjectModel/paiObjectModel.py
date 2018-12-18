@@ -161,12 +161,15 @@ class paiObjectModel:
             host["grafana"] = "true"
             host["pylon"] = "true"
             host["node-exporter"] = "true"
+            host["registryrole"] = "server"
+            host["userjob"] = "true"
 
         if "qizhi-worker" in host and host["qizhi-worker"] == "true":
 
             host["hdfsrole"] = "worker"
             host["yarnrole"] = "worker"
             host["node-exporter"] = "true"
+            host["registryrole"] = "client"
 
 
 
@@ -274,6 +277,21 @@ class paiObjectModel:
         serviceDict["clusterinfo"]["prometheusinfo"]["node_exporter_port"] = \
             serviceDict["clusterinfo"]["prometheusinfo"]["node-exporter-port"]
 
+        # section: registry
+
+        serviceDict["clusterinfo"]["registryinfo"] = \
+            self.rawData["serviceConfiguration"]["registry"]
+        serviceDict["clusterinfo"]["registryinfo"]["server_port"] = \
+            serviceDict["clusterinfo"]["registryinfo"]["server-port"]
+        serviceDict["clusterinfo"]["registryinfo"]["server_ip"] = \
+            serviceDict["clusterinfo"]["registryinfo"]["server-ip"]
+
+        # section: user
+        serviceDict["clusterinfo"]["userinfo"] = \
+            self.rawData["serviceConfiguration"]["user"]
+        serviceDict["clusterinfo"]["userinfo"]["secretary_password"] = \
+            serviceDict["clusterinfo"]["userinfo"]["secretary-password"]
+        
         # section
 
         serviceDict["clusterinfo"]["pyloninfo"] = \

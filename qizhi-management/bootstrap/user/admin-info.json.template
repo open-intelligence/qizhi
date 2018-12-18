@@ -1,0 +1,5 @@
+{
+	"username": "{{ clusterinfo['restserverinfo']['default_qizhi_admin_username'] }}",
+	"password": "{{ clusterinfo['restserverinfo']['default_qizhi_admin_password'] }}",
+	"expiration": "86400"
+}

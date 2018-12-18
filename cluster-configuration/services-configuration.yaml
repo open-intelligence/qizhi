@@ -116,3 +116,12 @@ prometheus:
 pylon:
   # port of pylon
   port: 80
+
+registry:
+  # ip and port for docker registry server
+  server-ip: your_registry_server_ip
+  server-port: 5000
+
+user:
+  # password for secretary (who submit a default job for each user)
+  secretary-password: your_secretary_password

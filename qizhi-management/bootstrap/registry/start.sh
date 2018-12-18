@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # Copyright (c) Microsoft Corporation
 # All rights reserved.
 #
@@ -23,43 +25,13 @@
 # Management Regulation V1.0", which is provided by The New Generation of 
 # Artificial Intelligence Technology Innovation Strategic Alliance (the AITISA).
 
+pushd $(dirname "$0") > /dev/null
 
-{% for host in machinelist %}
+chmod u+x node-label.sh
 
-{{ host }}:
-    ip: {{ machinelist[host]['ip'] }}
-    dataFolder: {{ machineinfo[ machinelist[ host ][ 'machinetype' ] ][ 'dataFolder' ] }}
-    {% if 'zkid' in machinelist[host] -%}
-    zkid: "{{ machinelist[host]['zkid'] }}"
-    {% endif -%}
-    {% if 'gpu' in machineinfo[ machinelist[ host ][ 'machinetype' ] ] -%}
-    machinetype: gpu
-    {% endif -%}
-    {% if 'hdfsrole' in machinelist[host] -%}
-    hdfsrole: {{ machinelist[host]['hdfsrole'] }}
-    {% endif -%}
-    {% if 'yarnrole' in machinelist[host] -%}
-    yarnrole: {{ machinelist[host]['yarnrole'] }}
-    {% endif -%}
-    {% if 'zookeeper' in machinelist[host] -%}
-    zookeeper: "{{ machinelist[host]['zookeeper'] }}"
-    {% endif -%}
-    {% if 'jobhistory' in machinelist[host] -%}
-    jobhistory: "{{ machinelist[host]['jobhistory'] }}"
-    {% endif -%}
-    {% if 'launcher' in machinelist[host] -%}
-    launcher: "{{ machinelist[host]['launcher'] }}"
-    {% endif -%}
-    {% if 'restserver' in machinelist[host] -%}
-    restserver: "{{ machinelist[host]['restserver'] }}"
-    {% endif -%}
-    {% if 'webportal' in machinelist[host] -%}
-    webportal: "{{ machinelist[host]['webportal'] }}"
-    {% endif -%}
-    {% if 'registryrole' in machinelist[host] -%}
-    registryrole: "{{ machinelist[host]['registryrole'] }}"
-    {% endif -%}
-    {% if 'userjob' in machinelist[host] -%}
-    userjob: "{{ machinelist[host]['userjob'] }}"
-    {% endif -%}
-{% endfor %}
+./node-label.sh
+
+kubectl create -f kube-registry-ds.yaml
+kubectl create -f kube-registry-proxy-ds.yaml
+
+popd > /dev/null

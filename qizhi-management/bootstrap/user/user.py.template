@@ -1,0 +1,129 @@
+#!/usr/bin/env python
+
+# Copyright (c) Microsoft Corporation
+# All rights reserved.
+#
+# MIT License
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+# documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
+# to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+# BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+#
+# Copyright (c) Peking University 2018
+#
+# The software is released under the Open-Intelligence Open Source License V1.0.
+# The copyright owner promises to follow "Open-Intelligence Open Source Platform
+# Management Regulation V1.0", which is provided by The New Generation of
+# Artificial Intelligence Technology Innovation Strategic Alliance (the AITISA).
+
+import json
+import jinja2
+import urllib
+import urllib2
+import time
+import logging
+
+logger = logging.getLogger(__name__)
+logger.basicConfig(level=logging.DEBUG)
+
+rest_server_port = {{ clusterinfo['restserverinfo']['server_port'] }}
+url_user_list = "http://localhost:4001/v2/keys/users"
+url_token = "http://localhost:{0}/api/v1/token".format(rest_server_port)
+url_user = "http://localhost:{0}/api/v1/user".format(rest_server_port)
+url_job = "http://localhost:{0}/api/v1/jobs".format(rest_server_port)
+
+def url_get(url):
+	req = urllib2.Request(url)
+	try:
+		data_json = json.loads(urllib2.urlopen(req).read())
+	except urllib2.URLError, e:
+		if hasattr(e, "reason"):
+			logger.error(e.reason)
+	return data_json
+
+# When etcd ready, get user list
+# GET /v2/keys/users
+user_list_json = url_get(url_user_list)
+
+# Read user list
+userlist = [entry['key'].replace('/users/', '').encode("utf-8")
+			for entry in user_list_json['node']['nodes']]
+
+# Fill job templates for each user (except secretary)
+with open("userjob.json.template", "r") as f:
+	template_data = f.read()
+
+for username in userlist:
+	if username == "secretary":
+		continue
+	generated_file = jinja2.Template(template_data).render(
+			{
+				"username": username,
+			}
+	)
+	file_path = "user-{0}.json".format(username)
+	with open(file_path, "w+") as fout:
+		fout.write(generated_file)
+
+# Log in admin to create new account "secretary" with preset info
+# POST /api/v1/token
+with open("admin-info.json", "r") as f:
+	admin_data = f.read()
+
+hdr = {"Content-type": "application/json"}
+req = urllib2.Request(url_token, admin_data, hdr)
+try:
+	token_json = json.loads(urllib2.urlopen(req).read())
+	admin_token = token_json['token'].encode("utf-8")
+except urllib2.URLError, e:
+	if hasattr(e, "reason"):
+		logger.error(e.reason)
+
+# PUT /api/v1/user
+with open("secretary-create-info.json", "r") as f:
+	secretary_create_data = f.read()
+hdr = {"Content-type": "application/json",
+	   "Authorization": "Bearer " + admin_token}
+req = urllib2.Request(url_user, secretary_create_data, hdr)
+req.get_method = lambda: 'PUT'
+try:
+	create_result_json = json.loads(urllib2.urlopen(req).read())
+	logging.info(create_result_json['message'].encode("utf-8"))
+except urllib2.URLError, e:
+	if hasattr(e, "reason"):
+		logger.error(e.reason)
+
+# Submit job for each user (except secretary) as secretary
+# POST /api/v1/token
+with open("secretary-info.json", "r") as f:
+	secretary_data = f.read()
+
+hdr = {"Content-type": "application/json"}
+req = urllib2.Request(url_token, secretary_data, hdr)
+token_json = json.loads(urllib2.urlopen(req).read())
+secretary_token = token_json['token'].encode("utf-8")
+
+# POST /api/v1/jobs
+for username in userlist:
+	if username == "secretary":
+		continue
+	with open("user-{0}.json".format(username), "r") as f:
+		job_data = f.read()
+	hdr = {"Content-type": "application/json",
+			"Authorization": "Bearer " + secretary_token}
+	req = urllib2.Request(url_job, job_data, hdr)
+	try:
+		job_result_json = json.loads(urllib2.urlopen(req).read())
+		logging.info(job_result_json['message'].encode("utf-8"))
+	except urllib2.URLError, e:
+		if hasattr(e, "reason"):
+			logger.error(e.reason)

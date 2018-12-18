@@ -419,7 +419,7 @@ class Job {
         if (!data.originalData.outputDir) {
           hdfs.createFolder(
             `/Output/${data.userName}/${name}`,
-            {'user.name': data.userName, 'permission': '755'},
+            {'user.name': data.userName, 'permission': '777'},
             (error, result) => {
               parallelCallback(error);
             }
@@ -432,7 +432,7 @@ class Job {
         async.each(['log', 'tmp', 'finished'], (x, eachCallback) => {
           hdfs.createFolder(
             `/Container/${data.userName}/${name}/` + x,
-            {'user.name': data.userName, 'permission': '755'},
+            {'user.name': data.userName, 'permission': '777'},
             (error, result) => {
               eachCallback(error);
             }
@@ -446,7 +446,7 @@ class Job {
           hdfs.createFile(
             `/Container/${data.userName}/${name}/YarnContainerScripts/${x}.sh`,
             this.generateYarnContainerScript(data, x),
-            {'user.name': data.userName, 'permission': '644', 'overwrite': 'true'},
+            {'user.name': data.userName, 'permission': '777', 'overwrite': 'true'},
             (error, result) => {
               eachCallback(error);
             }
@@ -460,7 +460,7 @@ class Job {
           hdfs.createFile(
             `/Container/${data.userName}/${name}/DockerContainerScripts/${x}.sh`,
             this.generateDockerContainerScript(data, x),
-            {'user.name': data.userName, 'permission': '644', 'overwrite': 'true'},
+            {'user.name': data.userName, 'permission': '777', 'overwrite': 'true'},
             (error, result) => {
               eachCallback(error);
             }
@@ -473,7 +473,7 @@ class Job {
         hdfs.createFile(
           `/Container/${data.userName}/${name}/${launcherConfig.jobConfigFileName}`,
           JSON.stringify(data.originalData, null, 2),
-          {'user.name': data.userName, 'permission': '644', 'overwrite': 'true'},
+          {'user.name': data.userName, 'permission': '777', 'overwrite': 'true'},
           (error, result) => {
             parallelCallback(error);
           }
@@ -483,7 +483,7 @@ class Job {
         hdfs.createFile(
           `/Container/${data.userName}/${name}/${launcherConfig.frameworkDescriptionFilename}`,
           JSON.stringify(this.generateFrameworkDescription(data), null, 2),
-          {'user.name': data.userName, 'permission': '644', 'overwrite': 'true'},
+          {'user.name': data.userName, 'permission': '777', 'overwrite': 'true'},
           (error, result) => {
             parallelCallback(error);
           }
