@@ -39,6 +39,7 @@ import com.microsoft.frameworklauncher.common.utils.ValueRangeUtils;
 import com.microsoft.frameworklauncher.common.utils.YamlUtils;
 import org.apache.hadoop.yarn.api.records.NodeReport;
 import org.apache.hadoop.yarn.client.api.AMRMClient.ContainerRequest;
+import java.util.concurrent.atomic.AtomicIntegerArray;
 
 import java.util.*;
 
@@ -323,6 +324,58 @@ public class SelectionManager { // THREAD SAFE
     return new ArrayList<ValueRange>();
   }
 
+  private void gpuAllocate(int neededGpuCount, AtomicIntegerArray allocateGpuAttribute, Long gpuAttribute, int depth, int begin, int end) {
+    if (neededGpuCount == 0)
+      return;
+    if (end - begin == 1) {
+      allocateGpuAttribute.set(begin, 1);
+      return;
+    }
+    int lengthOfSublist = (end - begin) / 2;
+    Long lowAttribute = gpuAttribute & ((1L << lengthOfSublist) - 1L);
+    Long highAttribute = gpuAttribute >>> lengthOfSublist;
+    int availableLowCount = lengthOfSublist - Long.bitCount(lowAttribute);
+    int availableHighCount = lengthOfSublist - Long.bitCount(highAttribute);
+    int mid = begin + lengthOfSublist;
+    int lowAllocateCount, highAllocateCount;
+    boolean highMoreAvailable = (availableHighCount >= availableLowCount);
+    // Large Request:
+    // If any branch can NOT fit the need alone, divide request into 2 parts.
+    // The branch with more room available should be full to minimize the communication cost between 
+    // Gpus.
+    if (neededGpuCount > Math.max(availableHighCount, availableLowCount)) {
+      if (highMoreAvailable)
+      {
+        lowAllocateCount = neededGpuCount - availableHighCount;
+        highAllocateCount = availableHighCount;
+      }
+      else {
+        lowAllocateCount = availableLowCount;
+        highAllocateCount = neededGpuCount - availableLowCount;
+      }
+      gpuAllocate(lowAllocateCount, allocateGpuAttribute, lowAttribute, depth - 1, begin, mid);
+      gpuAllocate(highAllocateCount, allocateGpuAttribute, highAttribute, depth - 1, mid, end);
+    }
+    // Small Request:
+    // If any branch can fit the need alone, always allocate the branch with less room available. 
+    // The reason for this is that we are always focused on large requests. 
+    // So the following large requests will have more chances to be allocate on one branch of the tree.
+    else if (neededGpuCount <= Math.min(availableHighCount, availableLowCount)) {
+      if (highMoreAvailable)
+        gpuAllocate(neededGpuCount, allocateGpuAttribute, lowAttribute, depth - 1, begin, mid);
+      else
+        gpuAllocate(neededGpuCount, allocateGpuAttribute, highAttribute, depth - 1, mid, end);
+    }
+    // Medium request:
+    // Always allocate on one branch.
+    else {
+      if (highMoreAvailable)
+        gpuAllocate(neededGpuCount, allocateGpuAttribute, highAttribute, depth - 1, mid, end);
+      else
+        gpuAllocate(neededGpuCount, allocateGpuAttribute, lowAttribute, depth - 1, begin, mid);
+    }
+  }
+
   @VisibleForTesting
   public synchronized Long selectCandidateGpuAttribute(Node node, Integer requestGpuNumber) {
     ResourceDescriptor nodeAvailable = node.getAvailableResource();
@@ -334,9 +387,29 @@ public class SelectionManager { // THREAD SAFE
     // By default, using the simple sequential selection.
     // To improve it, considers the Gpu topology structure, find a node which can minimize
     // the communication cost among Gpus.
-    for (int i = 0; i < requestGpuNumber; i++) {
-      selectedGpuAttribute += (availableGpuAttribute - (availableGpuAttribute & (availableGpuAttribute - 1)));
-      availableGpuAttribute &= (availableGpuAttribute - 1);
+
+    int totalGpuNumber = node.getTotalResource().getGpuNumber().intValue();
+    // If the number of Gpu is 2^k, assume the topology is a Complete Binary Tree
+    // In fact, most of the Nvidia servers are following this form of architecture,
+    // some of them have extra NVLinks.
+    if ((totalGpuNumber & (totalGpuNumber - 1)) == 0)
+    {
+      int treeDepth = Integer.numberOfTrailingZeros(totalGpuNumber);
+      AtomicIntegerArray allocateGpuAttribute = new AtomicIntegerArray(totalGpuNumber);
+      gpuAllocate(requestGpuNumber.intValue(), allocateGpuAttribute, availableGpuAttribute, treeDepth, 0, totalGpuNumber);
+
+      for (int i = 0; i < totalGpuNumber; ++i)
+        if (allocateGpuAttribute.get(i) == 1)
+          selectedGpuAttribute += (1L << i);
+
+      availableGpuAttribute -= selectedGpuAttribute;     
+    }
+    else
+    {
+      for (int i = 0; i < requestGpuNumber; i++) {
+        selectedGpuAttribute += (availableGpuAttribute - (availableGpuAttribute & (availableGpuAttribute - 1)));
+        availableGpuAttribute &= (availableGpuAttribute - 1);
+      }
     }
     return selectedGpuAttribute;
   }
