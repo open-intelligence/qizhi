@@ -32,6 +32,8 @@ import com.microsoft.frameworklauncher.common.log.DefaultLogger;
 import com.microsoft.frameworklauncher.common.model.LauncherConfiguration;
 import com.microsoft.frameworklauncher.common.model.NodeConfiguration;
 import com.microsoft.frameworklauncher.common.model.ResourceDescriptor;
+import com.microsoft.frameworklauncher.common.model.TaskState;
+import com.microsoft.frameworklauncher.common.model.TaskStatus;
 import com.microsoft.frameworklauncher.common.model.ValueRange;
 import com.microsoft.frameworklauncher.common.utils.CommonUtils;
 import com.microsoft.frameworklauncher.common.utils.HadoopUtils;
@@ -39,7 +41,6 @@ import com.microsoft.frameworklauncher.common.utils.ValueRangeUtils;
 import com.microsoft.frameworklauncher.common.utils.YamlUtils;
 import org.apache.hadoop.yarn.api.records.NodeReport;
 import org.apache.hadoop.yarn.client.api.AMRMClient.ContainerRequest;
-import java.util.concurrent.atomic.AtomicIntegerArray;
 
 import java.util.*;
 
@@ -171,6 +172,28 @@ public class SelectionManager { // THREAD SAFE
     for (String nodeName : filteredNodes) {
       candidateNodes.add(allNodes.get(nodeName));
     }
+
+    // If previous tasks get their containers requested on some nodes, the following tasks should reuse these nodes to reduce communication overheads. 
+    Set<TaskState> taskStateSet = new HashSet<>();
+    taskStateSet.add(TaskState.CONTAINER_REQUESTED);
+    List<TaskStatus> containerRequestedTaskStatuses = statusManager.getTaskStatus(taskStateSet);
+    List<Node> reusedNodes = new ArrayList<Node>();
+    for (Node candidateNode : candidateNodes) {
+      for (TaskStatus taskStatus : containerRequestedTaskStatuses) {
+        if (taskStatus.getContainerHost().equals(candidateNode.getHost())) {
+          reusedNodes.add(candidateNode);
+          LOGGER.logInfo("Select: Previous requested host: [%s]", candidateNode.getHost());
+          break;
+        }
+      }
+    }
+    if (!reusedNodes.isEmpty()) {
+      candidateNodes = new ArrayList<Node>(reusedNodes);
+    }
+    else {
+      LOGGER.logInfo("Select: No host could be reused");
+    }
+
     Collections.sort(candidateNodes);
     for (int i = 0; i < requestNumber && i < candidateNodes.size(); i++) {
       Node node = candidateNodes.get(i);
@@ -324,11 +347,11 @@ public class SelectionManager { // THREAD SAFE
     return new ArrayList<ValueRange>();
   }
 
-  private void gpuAllocate(int neededGpuCount, AtomicIntegerArray allocateGpuAttribute, Long gpuAttribute, int depth, int begin, int end) {
+  private void gpuAllocate(int neededGpuCount, int[] allocateGpuAttribute, Long gpuAttribute, int depth, int begin, int end) {
     if (neededGpuCount == 0)
       return;
     if (end - begin == 1) {
-      allocateGpuAttribute.set(begin, 1);
+      allocateGpuAttribute[begin] = 1;
       return;
     }
     int lengthOfSublist = (end - begin) / 2;
@@ -395,11 +418,11 @@ public class SelectionManager { // THREAD SAFE
     if ((totalGpuNumber & (totalGpuNumber - 1)) == 0)
     {
       int treeDepth = Integer.numberOfTrailingZeros(totalGpuNumber);
-      AtomicIntegerArray allocateGpuAttribute = new AtomicIntegerArray(totalGpuNumber);
+      int[] allocateGpuAttribute = new int[totalGpuNumber];
       gpuAllocate(requestGpuNumber.intValue(), allocateGpuAttribute, availableGpuAttribute, treeDepth, 0, totalGpuNumber);
 
       for (int i = 0; i < totalGpuNumber; ++i)
-        if (allocateGpuAttribute.get(i) == 1)
+        if (allocateGpuAttribute[i] == 1)
           selectedGpuAttribute += (1L << i);
 
       availableGpuAttribute -= selectedGpuAttribute;     
