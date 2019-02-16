@@ -27,6 +27,7 @@
 package com.microsoft.frameworklauncher.applicationmaster;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.microsoft.frameworklauncher.common.exts.CommonExts;
 import com.microsoft.frameworklauncher.common.exceptions.NotAvailableException;
 import com.microsoft.frameworklauncher.common.log.DefaultLogger;
 import com.microsoft.frameworklauncher.common.model.LauncherConfiguration;
@@ -176,14 +177,18 @@ public class SelectionManager { // THREAD SAFE
     // If previous tasks get their containers requested on some nodes, the following tasks should reuse these nodes to reduce communication overheads. 
     Set<TaskState> taskStateSet = new HashSet<>();
     taskStateSet.add(TaskState.CONTAINER_REQUESTED);
+    taskStateSet.add(TaskState.CONTAINER_ALLOCATED);
     List<TaskStatus> containerRequestedTaskStatuses = statusManager.getTaskStatus(taskStateSet);
     List<Node> reusedNodes = new ArrayList<Node>();
-    for (Node candidateNode : candidateNodes) {
-      for (TaskStatus taskStatus : containerRequestedTaskStatuses) {
-        if (taskStatus.getContainerHost().equals(candidateNode.getHost())) {
-          reusedNodes.add(candidateNode);
-          LOGGER.logInfo("Select: Previous requested host: [%s]", candidateNode.getHost());
-          break;
+    if (!candidateNodes.isEmpty() && !containerRequestedTaskStatuses.isEmpty()) {
+      for (Node candidateNode : candidateNodes) {
+        for (TaskStatus taskStatus : containerRequestedTaskStatuses) {
+          String hostName = taskStatus.getContainerHost();
+          if (hostName != null && hostName.equals(candidateNode.getHost())) {
+            reusedNodes.add(candidateNode);
+            LOGGER.logInfo("Select: Previous requested host: [%s]", candidateNode.getHost());
+            break;
+          }
         }
       }
     }
@@ -347,18 +352,20 @@ public class SelectionManager { // THREAD SAFE
     return new ArrayList<ValueRange>();
   }
 
-  private void gpuAllocate(int neededGpuCount, int[] allocateGpuAttribute, Long gpuAttribute, int depth, int begin, int end) {
+  private void gpuAllocate(Integer neededGpuCount, int[] allocateGpuAttribute, Long availableGpuAttribute, int depth, int begin, int end) {
     if (neededGpuCount == 0)
       return;
     if (end - begin == 1) {
       allocateGpuAttribute[begin] = 1;
+      LOGGER.logInfo("select: Depth: [%d], Choose GPU with ID: [%d]", depth, begin);
       return;
     }
     int lengthOfSublist = (end - begin) / 2;
-    Long lowAttribute = gpuAttribute & ((1L << lengthOfSublist) - 1L);
-    Long highAttribute = gpuAttribute >>> lengthOfSublist;
-    int availableLowCount = lengthOfSublist - Long.bitCount(lowAttribute);
-    int availableHighCount = lengthOfSublist - Long.bitCount(highAttribute);
+    Long lowAttribute = availableGpuAttribute & ((1L << lengthOfSublist) - 1L);
+    Long highAttribute = availableGpuAttribute >>> lengthOfSublist;
+    LOGGER.logInfo("select: Depth: [%d], request: [%s], GPU low available attribute: [%s], GPU high available attribute: [%s]", depth, neededGpuCount.toString(), CommonExts.toStringWithBits(lowAttribute), CommonExts.toStringWithBits(highAttribute));
+    int availableLowCount = Long.bitCount(lowAttribute);
+    int availableHighCount = Long.bitCount(highAttribute);
     int mid = begin + lengthOfSublist;
     int lowAllocateCount, highAllocateCount;
     boolean highMoreAvailable = (availableHighCount >= availableLowCount);
@@ -367,6 +374,7 @@ public class SelectionManager { // THREAD SAFE
     // The branch with more room available should be full to minimize the communication cost between 
     // Gpus.
     if (neededGpuCount > Math.max(availableHighCount, availableLowCount)) {
+      LOGGER.logInfo("select: Depth: [%d], Large GPU request", depth);
       if (highMoreAvailable)
       {
         lowAllocateCount = neededGpuCount - availableHighCount;
@@ -376,26 +384,28 @@ public class SelectionManager { // THREAD SAFE
         lowAllocateCount = availableLowCount;
         highAllocateCount = neededGpuCount - availableLowCount;
       }
-      gpuAllocate(lowAllocateCount, allocateGpuAttribute, lowAttribute, depth - 1, begin, mid);
-      gpuAllocate(highAllocateCount, allocateGpuAttribute, highAttribute, depth - 1, mid, end);
+      gpuAllocate(lowAllocateCount, allocateGpuAttribute, lowAttribute, depth + 1, begin, mid);
+      gpuAllocate(highAllocateCount, allocateGpuAttribute, highAttribute, depth + 1, mid, end);
     }
     // Small Request:
     // If any branch can fit the need alone, always allocate the branch with less room available. 
     // The reason for this is that we are always focused on large requests. 
     // So the following large requests will have more chances to be allocate on one branch of the tree.
     else if (neededGpuCount <= Math.min(availableHighCount, availableLowCount)) {
+      LOGGER.logInfo("select: Depth: [%d], Small GPU request", depth);
       if (highMoreAvailable)
-        gpuAllocate(neededGpuCount, allocateGpuAttribute, lowAttribute, depth - 1, begin, mid);
+        gpuAllocate(neededGpuCount, allocateGpuAttribute, lowAttribute, depth + 1, begin, mid);
       else
-        gpuAllocate(neededGpuCount, allocateGpuAttribute, highAttribute, depth - 1, mid, end);
+        gpuAllocate(neededGpuCount, allocateGpuAttribute, highAttribute, depth + 1, mid, end);
     }
     // Medium request:
     // Always allocate on one branch.
     else {
+      LOGGER.logInfo("select: Depth: [%d], Medium GPU request", depth);
       if (highMoreAvailable)
-        gpuAllocate(neededGpuCount, allocateGpuAttribute, highAttribute, depth - 1, mid, end);
+        gpuAllocate(neededGpuCount, allocateGpuAttribute, highAttribute, depth + 1, mid, end);
       else
-        gpuAllocate(neededGpuCount, allocateGpuAttribute, lowAttribute, depth - 1, begin, mid);
+        gpuAllocate(neededGpuCount, allocateGpuAttribute, lowAttribute, depth + 1, begin, mid);
     }
   }
 
@@ -417,9 +427,8 @@ public class SelectionManager { // THREAD SAFE
     // some of them have extra NVLinks.
     if ((totalGpuNumber & (totalGpuNumber - 1)) == 0)
     {
-      int treeDepth = Integer.numberOfTrailingZeros(totalGpuNumber);
       int[] allocateGpuAttribute = new int[totalGpuNumber];
-      gpuAllocate(requestGpuNumber.intValue(), allocateGpuAttribute, availableGpuAttribute, treeDepth, 0, totalGpuNumber);
+      gpuAllocate(requestGpuNumber, allocateGpuAttribute, availableGpuAttribute, 0, 0, totalGpuNumber);
 
       for (int i = 0; i < totalGpuNumber; ++i)
         if (allocateGpuAttribute[i] == 1)

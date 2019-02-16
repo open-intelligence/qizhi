@@ -552,8 +552,10 @@ public class StatusManager extends AbstractService {  // THREAD SAFE
 
     List<TaskStatus> taskStatuses = new ArrayList<>();
     for (TaskState taskState : acceptableTaskStateSet) {
-      for (TaskStatusLocator locator : taskStateLocators.get(taskState)) {
-        taskStatuses.add(getTaskStatus(locator));
+      if (taskStateLocators.containsKey(taskState)) {
+        for (TaskStatusLocator locator : taskStateLocators.get(taskState)) {
+          taskStatuses.add(getTaskStatus(locator));
+        }
       }
     }
     return taskStatuses;
