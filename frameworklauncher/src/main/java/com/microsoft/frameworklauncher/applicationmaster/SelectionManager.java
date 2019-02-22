@@ -176,17 +176,18 @@ public class SelectionManager { // THREAD SAFE
 
     // If previous tasks get their containers requested on some nodes, the following tasks should reuse these nodes to reduce communication overheads. 
     Set<TaskState> taskStateSet = new HashSet<>();
-    taskStateSet.add(TaskState.CONTAINER_REQUESTED);
-    taskStateSet.add(TaskState.CONTAINER_ALLOCATED);
-    List<TaskStatus> containerRequestedTaskStatuses = statusManager.getTaskStatus(taskStateSet);
+    List<TaskStatus> containerRequestedTaskStatuses = statusManager.getTaskStatus(taskStateSet, false);
     List<Node> reusedNodes = new ArrayList<Node>();
     if (!candidateNodes.isEmpty() && !containerRequestedTaskStatuses.isEmpty()) {
       for (Node candidateNode : candidateNodes) {
         for (TaskStatus taskStatus : containerRequestedTaskStatuses) {
           String hostName = taskStatus.getContainerHost();
-          if (hostName != null && hostName.equals(candidateNode.getHost())) {
-            reusedNodes.add(candidateNode);
-            LOGGER.logInfo("Select: Previous requested host: [%s]", candidateNode.getHost());
+          if (hostName == null) {
+            continue;
+          }
+          LOGGER.logInfo("Select: Previous requested host: [%s]", hostName);
+          if (hostName.equals(candidateNode.getHost())) {
+            reusedNodes.add(candidateNode);            
             break;
           }
         }
