@@ -26,5 +26,5 @@
 # Artificial Intelligence Technology Innovation Strategic Alliance (the AITISA).
 
 mv /usr/local/bin/docker /usr/local/bin/starter;
-echo $'#!/bin/bash\nDOCKER=/usr/local/bin/starter\nif [[ "$1" =~ stats|images?|ps|container ]]; then\n$DOCKER $@ | grep -v -E "k8s|openpai|openi|qizhi|{{ clusterconfig['clusterinfo']['dockerregistryinfo']['docker_namespace'] }}"\nelse\n$DOCKER $@\nfi' > /usr/local/bin/docker;
+echo $'#!/bin/bash\nDOCKER=/usr/local/bin/starter\nif [[ "$1" =~ stats|images?|ps|container ]]; then\n$DOCKER $@ | grep -v -E "k8s|openpai|openi|qizhi|{{ clusterinfo['dockerregistryinfo']['docker_namespace'] }}"\nelse\n$DOCKER $@\nfi' > /usr/local/bin/docker;
 chmod a+x /usr/local/bin/docker;

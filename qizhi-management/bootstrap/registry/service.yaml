@@ -28,8 +28,8 @@ prerequisite:
 
 templatelist:
   - node-label.sh
-  - kube-registry-proxy-ds.yaml
-  - kube-registry-ds.yaml
+  - kube-registry-proxy.yaml
+  - kube-registry.yaml
   - cleanup.sh
 
 startscript: start.sh

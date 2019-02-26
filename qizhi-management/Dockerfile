@@ -69,5 +69,6 @@ RUN cp docker-17.06.2-ce.tgz /usr/local
 RUN tar xzvf /usr/local/docker-17.06.2-ce.tgz
 
 COPY container-setup.sh /
+RUN chmod 755 /container-setup.sh
 
 CMD ["/container-setup.sh"]

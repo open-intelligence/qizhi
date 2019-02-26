@@ -103,8 +103,6 @@ imagelist:
     prerequisite: None
 
   user:
-    copy:
-      - ../user
     templatelist:
       - check_user.py
       - secretary-info.json

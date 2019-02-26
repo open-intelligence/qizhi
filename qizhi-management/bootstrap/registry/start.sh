@@ -31,7 +31,7 @@ chmod u+x node-label.sh
 
 ./node-label.sh
 
-kubectl create -f kube-registry-ds.yaml
-kubectl create -f kube-registry-proxy-ds.yaml
+kubectl create -f kube-registry.yaml
+kubectl create -f kube-registry-proxy.yaml
 
 popd > /dev/null

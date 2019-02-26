@@ -27,6 +27,8 @@
 
 pushd $(dirname "$0") > /dev/null
 
+chmod 755 *.py
+chmod 755 *.sh
 url_etcd="http://localhost:4001/v2/keys/users"
 url_rest_server="http://localhost:{{ clusterinfo['restserverinfo']['server_port'] }}/api/v1/virtual-clusters"
 while : ; do
@@ -35,7 +37,7 @@ while : ; do
 	# Wait for rest server ready
 	http_code1=$(curl -Is -m 10 -w %{http_code} -o /dev/null $url_rest_server)
 
-	[[ $http_code0 -ne 200 -o $http_code1 -ne 200 ]] || break
+	[[ $http_code0 -ne 200 || $http_code1 -ne 200 ]] || break
 	echo "rest-server or etcd-server not ready yet"
 	sleep 5
 done
