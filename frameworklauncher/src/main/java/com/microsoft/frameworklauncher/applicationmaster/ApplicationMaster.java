@@ -364,6 +364,8 @@ public class ApplicationMaster extends AbstractService {
       updateNodeReports(yarnClient.getNodeReports(NodeState.RUNNING));
       SelectionResult selectionResult = selectionManager.selectSingleNode(taskRoleName);
 
+      selectionManager.setPredictedHostName(new TaskStatusLocator(taskRoleName, taskStatus.getTaskIndex()), selectionResult.getNodeHosts().get(0));
+
       ResourceDescriptor optimizedRequestResource = selectionResult.getOptimizedResource();
       if (selectionResult.getNodeHosts().size() > 0) {
         return HadoopUtils.toContainerRequest(optimizedRequestResource, requestPriority, null, selectionResult.getNodeHosts().get(0));

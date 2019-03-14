@@ -61,6 +61,7 @@ public class SelectionManager { // THREAD SAFE
   private final Map<String, ResourceDescriptor> localTriedResource = new HashMap<>();
   private final Map<String, List<ValueRange>> previousRequestedPorts = new HashMap<>();
   private final List<String> filteredNodes = new ArrayList<String>();
+  private Map<TaskStatusLocator, String> predictedHostNames = new HashMap<>();
   private LauncherConfiguration conf = null;
   private StatusManager statusManager = null;
   private RequestManager requestManager = null;
@@ -174,17 +175,15 @@ public class SelectionManager { // THREAD SAFE
       candidateNodes.add(allNodes.get(nodeName));
     }
 
-    // If previous tasks get their containers requested on some nodes, the following tasks should reuse these nodes to reduce communication overheads. 
-    Set<TaskState> taskStateSet = new HashSet<>();
-    List<TaskStatus> containerRequestedTaskStatuses = statusManager.getTaskStatus(taskStateSet, false);
+    // If previous tasks get their containers requested on some nodes, the following tasks should reuse these nodes to reduce communication overheads.
+
+    // Set<TaskState> taskStateSet = new HashSet<>();
+    // List<TaskStatus> containerRequestedTaskStatuses = statusManager.getTaskStatus(taskStateSet, false);
     List<Node> reusedNodes = new ArrayList<Node>();
-    if (!candidateNodes.isEmpty() && !containerRequestedTaskStatuses.isEmpty()) {
+    if (!candidateNodes.isEmpty() && !predictedHostNames.isEmpty()) {
       for (Node candidateNode : candidateNodes) {
-        for (TaskStatus taskStatus : containerRequestedTaskStatuses) {
-          String hostName = taskStatus.getContainerHost();
-          if (hostName == null) {
-            continue;
-          }
+        for (String hostName : predictedHostNames.values()) {
+          // LOGGER.logInfo("Select: Checking task: [%s-%s] [%s]", taskStatus.getTaskRoleName(), taskStatus.getTaskIndex(), taskStatus.getTaskState());
           LOGGER.logInfo("Select: Previous requested host: [%s]", hostName);
           if (hostName.equals(candidateNode.getHost())) {
             reusedNodes.add(candidateNode);            
@@ -512,5 +511,9 @@ public class SelectionManager { // THREAD SAFE
         LOGGER.logWarning("removeContainerRequest: Node is no longer a candidate: %s", nodeHost);
       }
     }
+  }
+
+  public synchronized void setPredictedHostName(TaskStatusLocator locator, String hostName) {
+    predictedHostNames.put(locator, hostName);
   }
 }
