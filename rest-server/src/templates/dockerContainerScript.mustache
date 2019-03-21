@@ -80,6 +80,16 @@ port_list=(${QIZHI_CONTAINER_HOST_PORT_LIST//;/ })
 for ports in "${port_list[@]}"; do
   port_label="$(cut -f 1 -d":" <<< $ports)"
   export QIZHI_CONTAINER_HOST_${port_label}_PORT_LIST="$(cut -f 2 -d":" <<< $ports)"
+
+  if [ $port_label = "dist" ]; then
+    hdfs_dist_folder=${HDFS_LAUNCHER_PREFIX}/${QIZHI_USER_NAME}/${QIZHI_JOB_NAME}/dist/${APP_ID}
+
+    hdfs dfs -mkdir -p "${hdfs_dist_folder}" || exit 1
+
+    export QIZHI_CONTAINER_DIST_PORT="$(cut -f 1 -d"," <<< $QIZHI_CONTAINER_HOST_dist_PORT_LIST)"
+
+    hdfs dfs -touchz ${hdfs_dist_folder}/$QIZHI_CONTAINER_HOST_IP-$QIZHI_CONTAINER_DIST_PORT || exit 1
+  fi
 done
 
 export QIZHI_CONTAINER_HOST_PORT="$(cut -f 1 -d"," <<< $QIZHI_CONTAINER_HOST_http_PORT_LIST)"
@@ -105,6 +115,19 @@ if [ "$(cat ContainerList | wc -l)" -ne $QIZHI_JOB_TASK_COUNT ]; then
     "$(cat ContainerList)" \
     "$(cat ContainerList | wc -l) containers are available, not equal to $QIZHI_JOB_TASK_COUNT, exit ..."
   exit 2
+fi
+
+# When Job set "dist" port used for distributed task
+hdfs dfs -test -e ${HDFS_LAUNCHER_PREFIX}/${QIZHI_USER_NAME}/${QIZHI_JOB_NAME}/dist
+if [ $? -eq 0 ]; then
+  printf "%s %s\n" "[INFO]" "This is a distributed job"
+  hdfs dfs -ls $HDFS_LAUNCHER_PREFIX/$QIZHI_USER_NAME/$QIZHI_JOB_NAME/dist/${APP_ID}/ \
+  | grep "/$QIZHI_JOB_NAME/dist/${APP_ID}" \
+  | grep -oE "[^/]+$" \
+  > DistList
+  dist_info=`sed -n "1p" DistList`
+  export QIZHI_DIST_HOST_AND_PORT=$dist_info
+  rm DistList
 fi
 
 export QIZHI_CURRENT_TASK_ROLE_CURRENT_TASK_INDEX=$((`cat ContainerList | grep "^$task_role_no-" | grep -n "$task_role_no-$QIZHI_TASK_INDEX-$QIZHI_CONTAINER_HOST_IP-$QIZHI_CONTAINER_HOST_PORT" | cut -d ":" -f 1`-1))
