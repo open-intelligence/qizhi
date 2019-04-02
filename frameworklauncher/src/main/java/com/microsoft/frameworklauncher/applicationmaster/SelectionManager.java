@@ -352,62 +352,91 @@ public class SelectionManager { // THREAD SAFE
     return new ArrayList<ValueRange>();
   }
 
-  private void gpuAllocate(Integer neededGpuCount, int[] allocateGpuAttribute, Long availableGpuAttribute, int depth, int begin, int end) {
-    if (neededGpuCount == 0)
-      return;
-    if (end - begin == 1) {
-      allocateGpuAttribute[begin] = 1;
-      LOGGER.logInfo("select: Depth: [%d], Choose GPU with ID: [%d]", depth, begin);
-      return;
-    }
-    int lengthOfSublist = (end - begin) / 2;
-    Long lowAttribute = availableGpuAttribute & ((1L << lengthOfSublist) - 1L);
-    Long highAttribute = availableGpuAttribute >>> lengthOfSublist;
-    LOGGER.logInfo("select: Depth: [%d], request: [%s], GPU low available attribute: [%s], GPU high available attribute: [%s]", depth, neededGpuCount.toString(), CommonExts.toStringWithBits(lowAttribute), CommonExts.toStringWithBits(highAttribute));
-    int availableLowCount = Long.bitCount(lowAttribute);
-    int availableHighCount = Long.bitCount(highAttribute);
-    int mid = begin + lengthOfSublist;
-    int lowAllocateCount, highAllocateCount;
-    boolean highMoreAvailable = (availableHighCount >= availableLowCount);
-    // Large Request:
-    // If any branch can NOT fit the need alone, divide request into 2 parts.
-    // The branch with more room available should be full to minimize the communication cost between 
-    // Gpus.
-    if (neededGpuCount > Math.max(availableHighCount, availableLowCount)) {
-      LOGGER.logInfo("select: Depth: [%d], Large GPU request", depth);
-      if (highMoreAvailable)
-      {
-        lowAllocateCount = neededGpuCount - availableHighCount;
-        highAllocateCount = availableHighCount;
-      }
-      else {
-        lowAllocateCount = availableLowCount;
-        highAllocateCount = neededGpuCount - availableLowCount;
-      }
-      gpuAllocate(lowAllocateCount, allocateGpuAttribute, lowAttribute, depth + 1, begin, mid);
-      gpuAllocate(highAllocateCount, allocateGpuAttribute, highAttribute, depth + 1, mid, end);
-    }
-    // Small Request:
-    // If any branch can fit the need alone, always allocate the branch with less room available. 
-    // The reason for this is that we are always focused on large requests. 
-    // So the following large requests will have more chances to be allocate on one branch of the tree.
-    else if (neededGpuCount <= Math.min(availableHighCount, availableLowCount)) {
-      LOGGER.logInfo("select: Depth: [%d], Small GPU request", depth);
-      if (highMoreAvailable)
-        gpuAllocate(neededGpuCount, allocateGpuAttribute, lowAttribute, depth + 1, begin, mid);
-      else
-        gpuAllocate(neededGpuCount, allocateGpuAttribute, highAttribute, depth + 1, mid, end);
-    }
-    // Medium request:
-    // Always allocate on one branch.
-    else {
-      LOGGER.logInfo("select: Depth: [%d], Medium GPU request", depth);
-      if (highMoreAvailable)
-        gpuAllocate(neededGpuCount, allocateGpuAttribute, highAttribute, depth + 1, mid, end);
-      else
-        gpuAllocate(neededGpuCount, allocateGpuAttribute, lowAttribute, depth + 1, begin, mid);
-    }
-  }
+  private int[] ringBasedOptimization(int rootPosition, int requestGpuNumber, int[] allocateGpuTreeAttribute, int height, int totalGpuNumber)
+	{
+		// Return a array. First value is length of path, the following values are the index of chosen GPUs. 
+		if (requestGpuNumber == 0) {
+			int[] result = new int[1];
+			result[0] = 0;
+			return result;
+		}
+		
+		if (height == 0) {
+			int[] result = new int[2];
+			result[0] = 0;
+			result[1] = rootPosition - totalGpuNumber;
+			return result;
+		}
+		
+		int leftPosition = rootPosition << 1;
+		int rightPosition = leftPosition + 1;
+		int leftAvailableGpuNumber = allocateGpuTreeAttribute[leftPosition];
+		int rightAvailableGpuNumber = allocateGpuTreeAttribute[rightPosition];
+		
+		int[] result = new int[requestGpuNumber + 1];
+		result[0] = -1;
+		for (int i = 0; i <= requestGpuNumber; ++i) {
+			if (requestGpuNumber - i > leftAvailableGpuNumber || i > rightAvailableGpuNumber) {
+				continue;
+			}
+			
+			int[] currentLeftResult = ringBasedOptimization(leftPosition, requestGpuNumber - i, allocateGpuTreeAttribute, height - 1, totalGpuNumber);
+			int[] currentRightResult = ringBasedOptimization(rightPosition, i, allocateGpuTreeAttribute, height - 1, totalGpuNumber);
+			
+			int subTreeLength = currentLeftResult[0] + currentRightResult[0];
+			// Use GPUs from 2 subtree, so need a link on this layer.
+			if (i != 0 && i != requestGpuNumber) {
+				subTreeLength += height;
+			}
+			if (result[0] == -1 || subTreeLength < result[0]) {
+				result[0] = subTreeLength;
+				System.arraycopy(currentLeftResult, 1, result, 1, requestGpuNumber - i);
+				System.arraycopy(currentRightResult, 1, result, 1 + requestGpuNumber - i, i);
+			}
+			
+		}
+		return result;
+	}
+
+  private int[] gpuAllocate(Integer requestGpuNumber, Long availableGpuAttribute, int totalGpuNumber)
+	{
+		// Here we build a full binary tree to represent counts
+		// of available GPUs in each subtree
+		int[] allocateGpuTreeAttribute = new int[2 * totalGpuNumber];
+		allocateGpuTreeAttribute[0] = -1;
+		
+		for (int i = totalGpuNumber; i < totalGpuNumber << 1; ++i) {
+			allocateGpuTreeAttribute[i] = new Long((availableGpuAttribute >>> (i - totalGpuNumber)) & 1L).intValue(); 
+		}
+		
+		boolean enoughOnCurrentLayer = false;
+		int root = -1;
+		List<Integer> rootPositionList = new ArrayList<Integer>();
+		for (int i = totalGpuNumber; i > 1; i >>>= 1) {
+			for (int j = i >>> 1; j < i; ++j) {
+				allocateGpuTreeAttribute[j] = allocateGpuTreeAttribute[j << 1] + allocateGpuTreeAttribute[(j << 1) + 1];
+				if (allocateGpuTreeAttribute[j] >= requestGpuNumber) {
+					rootPositionList.add(new Integer(j));
+					enoughOnCurrentLayer = true;
+				}
+			}
+			if (enoughOnCurrentLayer) {
+				root = i >>> 1;
+				break;
+			}
+		}
+		int height = Integer.numberOfTrailingZeros(totalGpuNumber) - Integer.numberOfTrailingZeros(Integer.highestOneBit(root));
+		int minimumLength = -1;
+		int[] result = null;
+		for (Integer id : rootPositionList) {
+			int[] currentResult = ringBasedOptimization(id.intValue(), requestGpuNumber, allocateGpuTreeAttribute, height, totalGpuNumber);
+			if (minimumLength == -1 || currentResult[0] < minimumLength) {
+				result = currentResult;
+				minimumLength = currentResult[0];
+			}
+		}
+		return result;
+	}
 
   @VisibleForTesting
   public synchronized Long selectCandidateGpuAttribute(Node node, Integer requestGpuNumber) {
@@ -427,12 +456,11 @@ public class SelectionManager { // THREAD SAFE
     // some of them have extra NVLinks.
     if ((totalGpuNumber & (totalGpuNumber - 1)) == 0)
     {
-      int[] allocateGpuAttribute = new int[totalGpuNumber];
-      gpuAllocate(requestGpuNumber, allocateGpuAttribute, availableGpuAttribute, 0, 0, totalGpuNumber);
+      int[] result = gpuAllocate(requestGpuNumber, availableGpuAttribute, totalGpuNumber);
 
-      for (int i = 0; i < totalGpuNumber; ++i)
-        if (allocateGpuAttribute[i] == 1)
-          selectedGpuAttribute += (1L << i);
+      for (int i = 1; i < result.length; ++i) {
+        selectedGpuAttribute += (1L << result[i]);
+      }
 
       availableGpuAttribute -= selectedGpuAttribute;     
     }
